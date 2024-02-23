@@ -33,3 +33,4 @@ rm(fp)
 
 - [ ] missing copy/delete functions for whole folders
 - [ ] copy local file to s3 reads the entire file into memory unnecessarily but it could be streamed
+- [ ] url encoding is missing for some parts of api
