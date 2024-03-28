@@ -48,8 +48,43 @@ end
 ################################################################################
 # Generic
 
-# TODO isfile
-# TODO isdir
+function exists(s3Path::S3Path)
+    try
+        S3.head_object(
+            s3Path.bucket,
+            s3Path.path;
+            aws_config=s3Path.aws_config
+        )
+        return true
+    catch e
+        if isa(e, AWS.AWSExceptions.AWSException) && e.code == "404"
+            return false
+        else
+            throw(e)
+        end
+    end
+end
+
+function Base.isfile(s3Path::S3Path)
+    if last(s3Path.path) == '/'
+        return false
+    end
+    return exists(s3Path)
+end
+
+function Base.isdir(s3Path::S3Path)
+    if last(s3Path.path) != '/'
+        return false
+    end
+    return exists(s3Path)
+end
+
+Base.rm(s3Path::S3Path) =
+    S3.delete_object(s3Path.bucket, s3Path.path; aws_config=s3Path.aws_config)
+
+function Base.mkpath(s3Path::S3Path)
+    S3.put_object(s3Path.bucket, s3Path.path; aws_config=s3Path.aws_config)
+end
 
 function Base.readdir(s3Path::S3Path; join=false, sort=true)
     results = String[]
@@ -205,13 +240,6 @@ function Base.write(s3Path::S3Path, content::Vector{UInt8}; blocksize=DEFAULTBUF
     end
 end
 
-Base.rm(s3Path::S3Path) =
-    S3.delete_object(s3Path.bucket, s3Path.path; aws_config=s3Path.aws_config)
-
-function Base.mkpath(s3Path::S3Path)
-    S3.put_object(s3Path.bucket, s3Path.path; aws_config=s3Path.aws_config)
-end
-
 ################################################################################
 # Copy helper functions to copy between S3 <-> S3 or Filesystem <-> S3
 
@@ -350,7 +378,7 @@ end
 #     # maxsize::Int
 #     # ptr::Int
 #     # mark::int
-# 
+#
 #     # Writing
 #     bucket::Union{AbstractString, Missing}
 #     key::Union{AbstractString, Missing}
@@ -375,16 +403,16 @@ end
 #         )
 #     end
 # end
-# 
+#
 # Base.isreadable(io::S3Buffer) = io.readable
 # Base.iswriteable(io::S3Buffer) = io.writeable
 # Base.isopen(io::S3Buffer) = io.readable || io.writeable
 # function Base.close(io::S3Buffer)
 #     io.readable = false
 #     io.writeable = false
-# 
+#
 #     # TODO needs to write anything left before closing
-# 
+#
 #     body = join(
 #         vcat(
 #             "<CompleteMultipartUpload>",
@@ -392,7 +420,7 @@ end
 #             "</CompleteMultipartUpload>"
 #         )
 #     )
-# 
+#
 #     @repeat 4 try
 #         S3.complete_multipart_upload(
 #             io.bucket,
@@ -404,12 +432,12 @@ end
 #         @delay_retry if true end
 #     end
 # end
-# 
+#
 # Base.read(p::S3Buffer) = read(Vector{UInt8}, p)
-# 
+#
 # function Base.read(type, p::S3Buffer)
 #     throw(ErrorException("Not Implemented Yet"))
-# 
+#
 #     # GET /example-object HTTP/1.1
 #     # Host: example-bucket.s3.<Region>.amazonaws.com
 #     # x-amz-date: Fri, 28 Jan 2011 21:32:02 GMT
@@ -426,18 +454,18 @@ end
 #     # and I think can find out size of object in advance via
 #     #
 #     # https://juliacloud.github.io/AWS.jl/stable/services/s3.html#Main.S3.head_object-Tuple{Any,%20Any}
-# 
+#
 # end
-# 
+#
 # Base.write(p::S3Buffer, content::AbstractString) = Base.write(p::S3Buffer, Vector{UInt8}(content))
-# 
+#
 # function Base.write(p::S3Buffer, content::Vector{UInt8})
 #     throw(ErrorException("Not Implemented Yet"))
-# 
+#
 #     # If content + buffer too large
 #     # then open upload if not open
 #     # write parts until fits in buffer again
-# 
+#
 #     if ismissing(bucket)
 #         result = @repeat 4 try
 #             S3.create_multipart_upload(
@@ -448,7 +476,7 @@ end
 #         catch e
 #             @delay_retry if true end
 #         end
-# 
+#
 #         io.bucket = result["Bucket"]
 #         io.key = result["Key"]
 #         io.uploadid = result["UploadId"]
