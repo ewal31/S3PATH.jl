@@ -17,6 +17,9 @@ fp = S3Path("s3://bucket/tmpfile")
 
 write(fp, "Something")
 
+isfile(fp) # true
+isdir(fp) # false
+
 readdir(dirname(fp)) # tempfile
                      # and any other files/folders
 
@@ -27,6 +30,19 @@ cp(fp, S3Path(bucket, "tmpfile2"))
 "Something" == read(String, S3Path(bucket, "tmpfile2")) # true
 
 rm(fp)
+
+# Writing larger amounts of data
+write1 = rand(UInt8, S3PATH.DEFAULTBUFFERSIZE * 2) # 10 MB
+write2 = rand(UInt8, S3PATH.DEFAULTBUFFERSIZE * 3) # 15 MB
+
+open(fp, "w") do io
+    write(io, write1)
+    write(io, write2)
+end
+
+read(fp) == vcat(write1, write2)
+
+rm(fp)
 ```
 
 ## TODO
@@ -34,3 +50,4 @@ rm(fp)
 - [ ] missing copy/delete functions for whole folders
 - [ ] copy local file to s3 reads the entire file into memory unnecessarily but it could be streamed
 - [ ] url encoding is missing for some parts of api
+- [ ] reading large files

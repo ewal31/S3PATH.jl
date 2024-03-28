@@ -173,8 +173,7 @@ function upload_part(s3Path::S3Path, uploadid, partnumber, part::V) where V <: A
             );
             aws_config=s3Path.aws_config
         )
-
-        return filter(p -> p.first == "ETag", headers)[1].second
+        return first(filter(p -> p.first == "ETag", headers)).second
     catch e
         @delay_retry if true end
     end
@@ -185,7 +184,7 @@ function finalise_multipart_upload(s3Path::S3Path, uploadid, upload_ids)
     body = join(
         vcat(
             "<CompleteMultipartUpload>",
-            map(x -> "<Part><PartNumber>$(x[1])</PartNumber><ETag>\"$(x[2])\"</ETag></Part>", upload_ids),
+            map(x -> "<Part><PartNumber>$(x[1])</PartNumber><ETag>\"$(x[2])\"</ETag></Part>", enumerate(upload_ids)),
             "</CompleteMultipartUpload>"
         )
     )
@@ -269,7 +268,7 @@ mutable struct S3WriteBuffer <: Base.IO
     s3Path::S3Path
     uploadid::Union{AbstractString, Missing}
     partnumber::UInt64
-    writtenparts::Vector{Tuple{UInt64, AbstractString}}
+    writtenparts::Vector{AbstractString}
     isopen::Bool
     function S3WriteBuffer(
         s3Path::S3Path;
@@ -282,7 +281,7 @@ mutable struct S3WriteBuffer <: Base.IO
             s3Path,
             missing,
             UInt64(0),
-            Vector{Tuple{UInt64, AbstractString}}(),
+            Vector{AbstractString}(),
             true
         )
     end
@@ -296,7 +295,7 @@ mutable struct S3ReadBuffer <: Base.IO
     buffer::IOBuffer
     s3Path::S3Path
     isopen::Bool
-    function S3WriteBuffer(
+    function S3ReadBuffer(
         s3Path::S3Path;
         buffersize = DEFAULTBUFFERSIZE
     )
@@ -327,112 +326,94 @@ function Base.open(f::Function, s3Path::S3Path, mode::AbstractString; buffersize
     end
 end
 
+# TODO might want a flush
+
 Base.write(io::S3WriteBuffer, content::Union{SubString{String}, String}) =
     Base.write(io::S3WriteBuffer, Vector{UInt8}(content))
 
 function Base.write(io::S3WriteBuffer, content::Vector{UInt8})
-    # If content + buffer too large
-    # then open upload if not open
-    # write parts until fits in buffer again
+    if length(content) + io.buffer.ptr - 1 > io.buffer.maxsize
 
-    if ismissing(io.uploadid)
-        io.uploadid = create_multipart_upload(io.s3Path)
+        if ismissing(io.uploadid)
+            io.uploadid = create_multipart_upload(io.s3Path)
+        end
+
+        # First finish writing buffer contents
+        ptr = io.buffer.maxsize - io.buffer.ptr + 1
+        write(io.buffer, content[1:ptr])
+        io.partnumber += 1
+        push!(
+            io.writtenparts,
+            upload_part(
+                io.s3Path,
+                io.uploadid,
+                io.partnumber,
+                io.buffer.data
+            )
+        )
+        ptr += 1
+
+        # Write any data that won't fit into the buffer
+        while length(content) - ptr + 1 > io.buffer.maxsize
+            io.partnumber += 1
+            push!(
+                io.writtenparts,
+                upload_part(
+                    io.s3Path,
+                    io.uploadid,
+                    io.partnumber,
+                    content[ptr:ptr+io.buffer.maxsize-1]
+                )
+            )
+            ptr += io.buffer.maxsize
+        end
+
+        # Add remaining data to buffer
+        seekstart(io.buffer)
+        write(io.buffer, content[ptr:end])
+
+    else
+
+        write(io.buffer, content)
+
     end
 end
 
 function Base.close(io::S3WriteBuffer)
     io.isopen = false
 
-    # TODO needs to write anything left before closing
+    if ismissing(io.uploadid)
 
-    # body = join(
-    #     vcat(
-    #         "<CompleteMultipartUpload>",
-    #         map(x -> "<Part><PartNumber>$(x[1])</PartNumber><ETag>\"$(x[2])\"</ETag></Part>", io.written),
-    #         "</CompleteMultipartUpload>"
-    #     )
-    # )
+        write(io.s3Path, io.buffer.data[1:io.buffer.ptr-1])
 
-    # @repeat 4 try
-    #     S3.complete_multipart_upload(
-    #         io.bucket,
-    #         io.key,
-    #         io.uploadid,
-    #         Dict("body"=>body)
-    #     )
-    # catch e
-    #     @delay_retry if true end
-    # end
+    else
+
+        if io.buffer.ptr > 1
+
+            # Write contents of buffer if there is any
+            io.partnumber += 1
+            push!(
+                io.writtenparts,
+                upload_part(
+                    io.s3Path,
+                    io.uploadid,
+                    io.partnumber,
+                    io.buffer.data[1:io.buffer.ptr-1]
+                )
+            )
+
+        end
+
+        finalise_multipart_upload(
+            io.s3Path,
+            io.uploadid,
+            io.writtenparts
+        )
+
+    end
+
 end
 
-
-
-# # Probably better to split into an S3WriteBuffer and S3ReadBuffer
-# mutable struct S3Buffer <: Base.IO
-#     data::IOBuffer
-#     readable::Bool
-#     writeable::Bool
-#     seekable::Bool
-#     append::Bool
-#     # size::Int
-#     # maxsize::Int
-#     # ptr::Int
-#     # mark::int
-#
-#     # Writing
-#     bucket::Union{AbstractString, Missing}
-#     key::Union{AbstractString, Missing}
-#     uploadid::Union{AbstractString, Missing}
-#     partnumber::UInt64
-#     written::Vector{Tuple{UInt64}, AbstractString}
-#     function S3Buffer(readable, writeable)
-#         @assert readable != writeable
-#         new(
-#             IOBuffer(;
-#                 maxsize=5 * 1_048_576 # 5 MB approx
-#             ),
-#             readable,
-#             writeable,
-#             false,
-#             false,
-#             missing,
-#             missing,
-#             missing,
-#             UInt64(0),
-#             Vector{Tuple{UInt64}, AbstractString}
-#         )
-#     end
-# end
-#
-# Base.isreadable(io::S3Buffer) = io.readable
-# Base.iswriteable(io::S3Buffer) = io.writeable
-# Base.isopen(io::S3Buffer) = io.readable || io.writeable
-# function Base.close(io::S3Buffer)
-#     io.readable = false
-#     io.writeable = false
-#
-#     # TODO needs to write anything left before closing
-#
-#     body = join(
-#         vcat(
-#             "<CompleteMultipartUpload>",
-#             map(x -> "<Part><PartNumber>$(x[1])</PartNumber><ETag>\"$(x[2])\"</ETag></Part>", io.written),
-#             "</CompleteMultipartUpload>"
-#         )
-#     )
-#
-#     @repeat 4 try
-#         S3.complete_multipart_upload(
-#             io.bucket,
-#             io.key,
-#             io.uploadid,
-#             Dict("body"=>body)
-#         )
-#     catch e
-#         @delay_retry if true end
-#     end
-# end
-#
 # Base.read(p::S3Buffer) = read(Vector{UInt8}, p)
 #
 # function Base.read(type, p::S3Buffer)
@@ -455,32 +436,6 @@ end
 #     #
 #     # https://juliacloud.github.io/AWS.jl/stable/services/s3.html#Main.S3.head_object-Tuple{Any,%20Any}
 #
-# end
-#
-# Base.write(p::S3Buffer, content::AbstractString) = Base.write(p::S3Buffer, Vector{UInt8}(content))
-#
-# function Base.write(p::S3Buffer, content::Vector{UInt8})
-#     throw(ErrorException("Not Implemented Yet"))
-#
-#     # If content + buffer too large
-#     # then open upload if not open
-#     # write parts until fits in buffer again
-#
-#     if ismissing(bucket)
-#         result = @repeat 4 try
-#             S3.create_multipart_upload(
-#                 p.bucket,
-#                 p.path;
-#                 aws_config=p.aws_config
-#             )
-#         catch e
-#             @delay_retry if true end
-#         end
-#
-#         io.bucket = result["Bucket"]
-#         io.key = result["Key"]
-#         io.uploadid = result["UploadId"]
-#     end
 # end
 
 export S3Path
