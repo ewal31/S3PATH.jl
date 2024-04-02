@@ -270,6 +270,7 @@ mutable struct S3WriteBuffer <: Base.IO
     partnumber::UInt64
     writtenparts::Vector{AbstractString}
     isopen::Bool
+    position
     function S3WriteBuffer(
         s3Path::S3Path;
         buffersize = DEFAULTBUFFERSIZE
@@ -282,7 +283,8 @@ mutable struct S3WriteBuffer <: Base.IO
             missing,
             UInt64(0),
             Vector{AbstractString}(),
-            true
+            true,
+            0
         )
     end
 end
@@ -290,6 +292,7 @@ end
 Base.isreadable(io::S3WriteBuffer) = false
 Base.iswritable(io::S3WriteBuffer) = io.isopen
 Base.isopen(io::S3WriteBuffer) = io.isopen
+Base.position(io::S3WriteBuffer) = io.position
 
 mutable struct S3ReadBuffer <: Base.IO
     buffer::IOBuffer
@@ -332,6 +335,8 @@ Base.write(io::S3WriteBuffer, content::Union{SubString{String}, String}) =
     Base.write(io::S3WriteBuffer, Vector{UInt8}(content))
 
 function Base.write(io::S3WriteBuffer, content::Vector{UInt8})
+    io.position += length(content)
+
     if length(content) + io.buffer.ptr - 1 > io.buffer.maxsize
 
         if ismissing(io.uploadid)

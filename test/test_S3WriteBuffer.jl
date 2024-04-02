@@ -15,6 +15,7 @@
         write(io, towrite)
 
         @test ismissing(io.uploadid) # Hasn't created an upload request as buffer isn't full
+        @test position(io) == length(towrite)
     end
 
     @test towrite == String(written)
@@ -55,6 +56,7 @@ end
         write(io, towrite)
 
         @test io.uploadid == uploadid_to_return
+        @test position(io) == length(towrite)
     end
 
     @test String(written) == towrite
@@ -71,6 +73,7 @@ end
         write(io, towrite)
 
         @test io.uploadid == uploadid_to_return
+        @test position(io) == length(towrite)
     end
 
     @test String(written) == towrite
@@ -86,7 +89,9 @@ end
         @test isopen(io)
 
         write(io, towrite1)
+        @test position(io) == length(towrite1)
         write(io, towrite2)
+        @test position(io) == length(towrite1) + length(towrite2)
 
         @test io.uploadid == uploadid_to_return
     end
@@ -105,6 +110,7 @@ end
         write(io, towrite)
 
         @test io.uploadid == uploadid_to_return
+        @test position(io) == length(towrite)
     end
 
     @test written == towrite
