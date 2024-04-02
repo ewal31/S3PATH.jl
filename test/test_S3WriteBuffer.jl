@@ -1,3 +1,30 @@
+@testitem "write bytes" begin
+
+    const towrite = "some small string"
+    const written = Vector{UInt8}()
+
+    # Mock Relevant Methods
+    function Base.write(io::S3PATH.S3Path, content::Vector{UInt8})
+        append!(written, content)
+    end
+
+    # Run Test
+    open(S3Path("s3://bucket/object"; aws_config=missing), "w") do io
+        @test isopen(io)
+
+        for (i, c) in enumerate(towrite)
+            write(io, c)
+            @test position(io) == i
+        end
+
+        @test ismissing(io.uploadid) # Hasn't created an upload request as buffer isn't full
+        @test position(io) == length(towrite)
+    end
+
+    @test towrite == String(written)
+
+end
+
 @testitem "write contents smaller than buffer" begin
 
     const towrite = "some small string"

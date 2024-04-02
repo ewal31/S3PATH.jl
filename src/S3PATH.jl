@@ -329,10 +329,15 @@ function Base.open(f::Function, s3Path::S3Path, mode::AbstractString; buffersize
     end
 end
 
-# TODO might want a flush
+# TODO might want a flush function
 
 Base.write(io::S3WriteBuffer, content::Union{SubString{String}, String}) =
     Base.write(io::S3WriteBuffer, Vector{UInt8}(content))
+
+# TODO don't want to wrap this in a vector everytime
+function Base.write(io::S3WriteBuffer, byte::UInt8)
+    write(io, [byte])
+end
 
 function Base.write(io::S3WriteBuffer, content::Vector{UInt8})
     io.position += length(content)
