@@ -3,7 +3,7 @@ module S3PATH
 using AWS
 using Retry
 
-@service S3
+@service S3 use_response_type = true
 
 const DEFAULTBUFFERSIZE = 5 * 1_048_576 # 5 MB approx
 
