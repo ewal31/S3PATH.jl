@@ -2,8 +2,9 @@ module S3PATH
 
 using AWS
 using Retry
+import Base: ==
 
-@service S3 use_response_type = true
+@service S3
 
 const DEFAULTBUFFERSIZE = 5 * 1_048_576 # 5 MB approx
 
@@ -22,6 +23,10 @@ struct S3Path
         new(bucket, path, aws_config)
     end
 end
+
+==(x::S3Path, y::S3Path) = x.bucket == y.bucket &&
+                           x.path == y.path &&
+                           x.aws_config == y.aws_config
 
 Base.tryparse(::Type{<:S3Path}, n::Nothing; aws_config=global_aws_config()) = nothing
 Base.tryparse(::Type{<:S3Path}, m::Missing; aws_config=global_aws_config()) = nothing
@@ -107,17 +112,33 @@ function Base.readdir(s3Path::S3Path; join=false, sort=true)
     end
 
     while token !== nothing
-        params = Dict("delimiter" => "/", "prefix" => s3Path.path)
+        params = Dict(
+            "delimiter" => "/",
+            "prefix" => s3Path.path,
+        )
 
         if !isempty(token)
             params["continuation-token"] = token
         end
 
-        result = S3.list_objects_v2(s3Path.bucket, params; aws_config=s3Path.aws_config)
-        token = get(result, "NextContinuationToken", nothing)
+        # Force parsing as XMl
+        # replacing the high-level method
+        # result = S3.list_objects_v2(s3Path.bucket, params; aws_config=s3Path.aws_config)
+        result = S3.s3(
+            "GET",
+            "/$(s3Path.bucket)?list-type=2",
+            params;
+            aws_config=s3Path.aws_config,
+            feature_set=AWS.FeatureSet(use_response_type=true),
+        )
 
-        add2result!(result, "CommonPrefixes", "Prefix")
-        add2result!(result, "Contents", "Key")
+        expected_result_type = MIME"application/xml"
+        resultdict = parse(result, expected_result_type())
+
+        token = get(resultdict, "NextContinuationToken", nothing)
+
+        add2result!(resultdict, "CommonPrefixes", "Prefix")
+        add2result!(resultdict, "Contents", "Key")
     end
 
     filter!(x -> !(isempty(x) || x == "/"), results)

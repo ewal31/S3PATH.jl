@@ -4,7 +4,7 @@
     const test_bucket = "bucket"
 
     using AWS
-    @service S3 use_response_type = true
+    @service S3
 
     # Modified to use custom test endpoint
     struct TestConfig <: AbstractAWSConfig
@@ -73,17 +73,23 @@
         ############################################
         # Test readdir
         #
-        # TODO: This doesn't work with the test server
-        #       as the returned XML isn't parsed
-        # contents = readdir(s3dir)
-        # @test length(contents) == 0
+        paths = readdir(s3dir)
+        @test length(paths) == 0
 
-        # for i in 1:10
-        #     write(joinpath(s3dir, "file_$(i)"), "This is file $(i)")
-        # end
+        for i in 1:10
+            write(joinpath(s3dir, "file_$(i)"), "This is file $(i)")
+        end
 
-        # contents = readdir(s3dir)
-        # @test length(contents) == 10
+        paths = readdir(s3dir)
+        @test length(paths) == 10
+        @test all(typeof.(paths) .== String)
+
+        s3paths = readdir(s3dir; join=true)
+        @test length(s3paths) == 10
+        @test all(typeof.(s3paths) .== S3Path)
+
+        @test all(dirname.(s3paths) .== Ref(s3dir))
+        @test basename.(s3paths) == paths
 
     finally
 
