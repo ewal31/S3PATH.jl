@@ -91,6 +91,16 @@
         @test all(dirname.(s3paths) .== Ref(s3dir))
         @test basename.(s3paths) == paths
 
+        ############################################
+        # Test splitdir
+        #
+        @test splitdir(S3Path("s3://bucket/")) == (S3Path("s3://bucket/"), "")
+        @test splitdir(S3Path("s3://bucket/dir/")) == (S3Path("s3://bucket/"), "dir/")
+        @test splitdir(S3Path("s3://bucket/dir/file")) == (S3Path("s3://bucket/dir/"), "file")
+        @test splitdir(S3Path("s3://bucket/dir/dir2/")) == (S3Path("s3://bucket/dir/"), "dir2/")
+        @test splitdir(S3Path("s3://bucket/dir/dir2/file2")) == (S3Path("s3://bucket/dir/dir2/"), "file2")
+        @test splitdir(splitdir(S3Path("s3://bucket/dir/dir2/file2"))[1]) == (S3Path("s3://bucket/dir/"), "dir2/")
+
     finally
 
         # Stop Test Server

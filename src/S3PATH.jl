@@ -50,6 +50,24 @@ function Base.joinpath(parts::Union{AbstractString, S3Path}...)
     )
 end
 
+function Base.splitdir(x::S3Path)
+    if endswith(x.path, '/')
+        (p1, p2) = splitdir(x.path[1:end-1])
+        p2 *= '/'
+    else
+        (p1, p2) = splitdir(x.path)
+    end
+
+    if !isempty(p1)
+        p1 *= "/"
+    end
+
+    return (
+        S3Path(x.bucket, p1; aws_config=x.aws_config),
+        p2
+    )
+end
+
 ################################################################################
 # Generic
 
