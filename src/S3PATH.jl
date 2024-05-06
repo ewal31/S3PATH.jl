@@ -176,6 +176,8 @@ function Base.read(type, s3Path::S3Path)
         S3.get_object(
             s3Path.bucket,
             s3Path.path,
+            # Force Binary Format
+            Dict("response-content-type"=>"application/octet-stream");
             aws_config=s3Path.aws_config
         )
     )
@@ -291,7 +293,16 @@ end
 
 function Base.cp(src::S3Path, dst::AbstractString)
     open(dst, "w") do f
-        write(f, S3.get_object(src.bucket, src.path; aws_config=src.aws_config))
+        write(
+            f,
+            S3.get_object(
+                src.bucket,
+                src.path,
+                # Force Binary Format
+                Dict("response-content-type"=>"application/octet-stream");
+                aws_config=src.aws_config
+            )
+        )
     end
 end
 
