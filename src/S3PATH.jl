@@ -289,6 +289,7 @@ function Base.cp(src::S3Path, dst::S3Path)
         joinpath(src.bucket, src.path);
         aws_config = src.aws_config
     )
+    return nothing
 end
 
 function Base.cp(src::S3Path, dst::AbstractString)
@@ -304,10 +305,22 @@ function Base.cp(src::S3Path, dst::AbstractString)
             )
         )
     end
+    return nothing
 end
 
-function Base.cp(src::AbstractString, dst::S3Path)
-    write(dst, read(src))
+function Base.cp(src::AbstractString, dst::S3Path; buffersize=DEFAULTBUFFERSIZE)
+    # Uploads the local file in blocks of at most buffersize.
+    open(src, "r") do io_in
+        open(dst, "w") do io_out
+            while !eof(io_in)
+                flush(io_out)
+                # Could put the data straight into the request buffer,
+                # but I guess this "simplifies" the code.
+                io_out.buffer.ptr = readbytes!(io_in, io_out.buffer.data, buffersize) + 1
+            end
+        end
+    end
+    return nothing
 end
 
 ################################################################################

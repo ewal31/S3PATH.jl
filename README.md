@@ -33,6 +33,13 @@ cp(fp, S3Path(bucket, "tmpfile2"))
 
 rm(fp)
 
+# Copy files to and from a bucket
+
+fp = S3Path("s3://bucket/a_file")
+cp("a_file", fp)
+cp(fp, "local_copy")
+run(`diff a_file local_copy`)
+
 # Writing larger amounts of data
 write1 = rand(UInt8, S3PATH.DEFAULTBUFFERSIZE * 2) # 10 MB
 write2 = rand(UInt8, S3PATH.DEFAULTBUFFERSIZE * 3) # 15 MB
@@ -68,6 +75,6 @@ rm(fp)
 ## TODO
 
 - missing copy/delete functions for whole folders
-- copy local file to s3 reads the entire file into memory unnecessarily but it could be streamed
+- ~~copy local file to s3 reads the entire file into memory unnecessarily but it could be streamed~~
 - url encoding is missing for some parts of api
 - reading large files / streaming files
