@@ -265,7 +265,7 @@ function Base.write(s3Path::S3Path, content::Vector{UInt8}; blocksize=DEFAULTBUF
     else
         uploadid = create_multipart_upload(s3Path)
         total_parts = Int(ceil(sizeof(content) / blocksize))
-        upload_ids = Vector(undef, total_parts) # TODO rename
+        upload_ids = Vector(undef, total_parts)
 
         Threads.@threads for partnumber in 1:total_parts
             upload_ids[partnumber] = upload_part(
@@ -307,7 +307,7 @@ function Base.cp(src::S3Path, dst::AbstractString)
 end
 
 function Base.cp(src::AbstractString, dst::S3Path)
-    write(dst, read(src)) # TODO make it work on streams as well
+    write(dst, read(src))
 end
 
 ################################################################################
@@ -379,28 +379,19 @@ function Base.open(f::Function, s3Path::S3Path, mode::AbstractString; buffersize
     end
 end
 
-# TODO might want a flush function
+function Base.flush(io::S3WriteBuffer)
+    towrite = io.buffer.ptr
 
-Base.write(io::S3WriteBuffer, content::Union{SubString{String}, String}) =
-    Base.write(io::S3WriteBuffer, Vector{UInt8}(content))
+    if towrite > 1
 
-# TODO don't want to wrap this in a vector everytime
-function Base.write(io::S3WriteBuffer, byte::UInt8)
-    write(io, [byte])
-end
-
-function Base.write(io::S3WriteBuffer, content::Vector{UInt8})
-    io.position += length(content)
-
-    if length(content) + io.buffer.ptr - 1 > io.buffer.maxsize
-
+        # Writing to S3 is only done via flush (unless on close
+        # only a small amount of data was written)
+        # Because the user can always call flush, we need to
+        # make sure that a multipart upload is started.
         if ismissing(io.uploadid)
             io.uploadid = create_multipart_upload(io.s3Path)
         end
 
-        # First finish writing buffer contents
-        ptr = io.buffer.maxsize - io.buffer.ptr + 1
-        write(io.buffer, content[1:ptr])
         io.partnumber += 1
         push!(
             io.writtenparts,
@@ -408,28 +399,48 @@ function Base.write(io::S3WriteBuffer, content::Vector{UInt8})
                 io.s3Path,
                 io.uploadid,
                 io.partnumber,
-                io.buffer.data
+                io.buffer.data[1:io.buffer.ptr-1]
             )
         )
+        seekstart(io.buffer)
+    end
+
+    return towrite
+end
+
+Base.write(io::S3WriteBuffer, content::Union{SubString{String}, String}) =
+    Base.write(io::S3WriteBuffer, Vector{UInt8}(content))
+
+function Base.write(io::S3WriteBuffer, byte::UInt8)
+    # This is used, for example by Parquet2.jl
+    io.position += 1
+
+    if io.buffer.ptr > io.buffer.maxsize
+        flush(io)
+    end
+
+    write(io.buffer, byte)
+end
+
+function Base.write(io::S3WriteBuffer, content::Vector{UInt8})
+    io.position += length(content)
+
+    if length(content) + io.buffer.ptr - 1 > io.buffer.maxsize
+
+        # First finish writing buffer contents
+        ptr = io.buffer.maxsize - io.buffer.ptr + 1
+        write(io.buffer, content[1:ptr])
+        flush(io)
         ptr += 1
 
         # Write any data that won't fit into the buffer
         while length(content) - ptr + 1 > io.buffer.maxsize
-            io.partnumber += 1
-            push!(
-                io.writtenparts,
-                upload_part(
-                    io.s3Path,
-                    io.uploadid,
-                    io.partnumber,
-                    content[ptr:ptr+io.buffer.maxsize-1]
-                )
-            )
+            write(io.buffer, content[ptr:ptr+io.buffer.maxsize-1])
+            flush(io)
             ptr += io.buffer.maxsize
         end
 
         # Add remaining data to buffer
-        seekstart(io.buffer)
         write(io.buffer, content[ptr:end])
 
     else
@@ -444,25 +455,13 @@ function Base.close(io::S3WriteBuffer)
 
     if ismissing(io.uploadid)
 
+        # Don't use multipart upload we only have a small
+        # amount of data to write
         write(io.s3Path, io.buffer.data[1:io.buffer.ptr-1])
 
     else
 
-        if io.buffer.ptr > 1
-
-            # Write contents of buffer if there is any
-            io.partnumber += 1
-            push!(
-                io.writtenparts,
-                upload_part(
-                    io.s3Path,
-                    io.uploadid,
-                    io.partnumber,
-                    io.buffer.data[1:io.buffer.ptr-1]
-                )
-            )
-
-        end
+        flush(io)
 
         finalise_multipart_upload(
             io.s3Path,

@@ -13,6 +13,8 @@ for S3 paths.
 ## Example
 
 ```julia
+using S3PATH
+
 fp = S3Path("s3://bucket/tmpfile")
 
 write(fp, "Something")
@@ -43,11 +45,29 @@ end
 read(fp) == vcat(write1, write2)
 
 rm(fp)
+
+# Writing a Parquet File to S3
+using DataFrames
+using Parquet2
+
+fp = S3Path("s3://bucket/data.parq")
+
+df = DataFrame(a = 1:20, b = 0, c = "awesome!")
+
+open(fp, "w") do io
+    Parquet2.writefile(io, df)
+end
+
+df2 = Parquet2.Dataset(read(fp)) |> DataFrame
+
+df == df2 # true
+
+rm(fp)
 ```
 
 ## TODO
 
-- [ ] missing copy/delete functions for whole folders
-- [ ] copy local file to s3 reads the entire file into memory unnecessarily but it could be streamed
-- [ ] url encoding is missing for some parts of api
-- [ ] reading large files
+- missing copy/delete functions for whole folders
+- copy local file to s3 reads the entire file into memory unnecessarily but it could be streamed
+- url encoding is missing for some parts of api
+- reading large files / streaming files

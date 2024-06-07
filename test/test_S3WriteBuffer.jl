@@ -1,4 +1,4 @@
-@testitem "write bytes" begin
+@testitem "write bytes smaller than buffer" begin
 
     const towrite = "some small string"
     const written = Vector{UInt8}()
@@ -22,6 +22,49 @@
     end
 
     @test towrite == String(written)
+
+end
+
+@testitem "write bytes larger than buffer" begin
+
+    const bytes_to_write = 10000
+    const buffer_size = 256
+    const towrite = rand(UInt8, bytes_to_write)
+    const total_parts_written = Int(ceil(bytes_to_write / 256))
+    const uploadid_to_return = "this is an id"
+    const written = Vector{UInt8}()
+
+    # Mock Relevant Methods
+    function S3PATH.S3.create_multipart_upload(bucket, path; aws_config=nothing)
+        return Dict("UploadId" => uploadid_to_return)
+    end
+
+    function S3PATH.upload_part(s3Path::S3Path, uploadid, partnumber, part::V) where V <: AbstractVector{UInt8}
+        @test uploadid == uploadid_to_return
+        append!(written, part)
+        return "$(partnumber)" # number and etag
+    end
+
+    function S3PATH.finalise_multipart_upload(s3Path::S3Path, uploadid, upload_ids)
+        @test uploadid == uploadid_to_return
+        @test length(upload_ids) == total_parts_written
+    end
+
+    # Run Test
+    open(S3Path("s3://bucket/object"; aws_config=missing), "w"; buffersize=buffer_size) do io
+        @test isopen(io)
+
+        for (i, c) in enumerate(towrite)
+            write(io, c)
+            @test position(io) == i
+        end
+
+        @test !ismissing(io.uploadid) # Should have written multiple parts
+        @test position(io) == length(towrite)
+    end
+
+    @test bytes_to_write == length(written)
+    @test towrite == written
 
 end
 
