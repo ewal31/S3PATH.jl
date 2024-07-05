@@ -358,19 +358,24 @@ Base.isopen(io::S3WriteBuffer) = io.isopen
 Base.position(io::S3WriteBuffer) = io.position
 
 mutable struct S3ReadBuffer <: Base.IO
-    buffer::IOBuffer
     s3Path::S3Path
     isopen::Bool
+    size::UInt64
+    position
     function S3ReadBuffer(
         s3Path::S3Path;
-        buffersize = DEFAULTBUFFERSIZE
     )
         new(
-            IOBuffer(;
-                maxsize=buffersize
-            ),
             s3Path,
-            true
+            true,
+            parse(
+                UInt64,
+                S3.head_object(
+                    s3Path.bucket,
+                    s3Path.path;
+                    aws_config=s3Path.aws_config
+                )["Content-Length"]),
+            0
         )
     end
 end
@@ -380,19 +385,21 @@ Base.iswritable(io::S3ReadBuffer) = false
 Base.isopen(io::S3ReadBuffer) = io.isopen
 
 function Base.open(f::Function, s3Path::S3Path, mode::AbstractString; buffersize=DEFAULTBUFFERSIZE)
-    @assert mode ∈ Set(["w"]) "Only write is currently supported"
+    @assert mode ∈ Set(["w", "r"]) "Only read or write is currently supported"
     if mode == "w"
         io = S3WriteBuffer(s3Path; buffersize=buffersize)
         f(io)
         close(io)
     else
-        io = S3ReadBuffer(s3Path; buffersize=buffersize)
+        io = S3ReadBuffer(s3Path)
         f(io)
         close(io)
     end
 end
 
 function Base.flush(io::S3WriteBuffer)
+    @assert iswritable(io) "Buffer isn't writeable"
+
     towrite = io.buffer.ptr
 
     if towrite > 1
@@ -425,6 +432,8 @@ Base.write(io::S3WriteBuffer, content::Union{SubString{String}, String}) =
     Base.write(io::S3WriteBuffer, Vector{UInt8}(content))
 
 function Base.write(io::S3WriteBuffer, byte::UInt8)
+    @assert iswritable(io) "Buffer isn't writeable"
+
     # This is used, for example by Parquet2.jl
     io.position += 1
 
@@ -436,6 +445,8 @@ function Base.write(io::S3WriteBuffer, byte::UInt8)
 end
 
 function Base.write(io::S3WriteBuffer, content::Vector{UInt8})
+    @assert iswritable(io) "Buffer isn't writeable"
+
     io.position += length(content)
 
     if length(content) + io.buffer.ptr - 1 > io.buffer.maxsize
@@ -463,8 +474,42 @@ function Base.write(io::S3WriteBuffer, content::Vector{UInt8})
     end
 end
 
+# TODO need to implement the variant that takes a byte buffer
+# as it is used by all the other already implemented functions on io
+# This is just a temporary solution
+function Base.read(io::S3ReadBuffer, nb::Integer)
+    @assert isreadable(io) "Buffer isn't readable"
+
+    from_byte = io.position
+    to_byte   = min(io.position + nb, io.size) - 1
+
+    result = S3.get_object(
+        io.s3Path.bucket,
+        io.s3Path.path,
+        # Force Binary Format
+        Dict(
+            "response-content-type" => "application/octet-stream",
+            "range" => "bytes=$(from_byte)-$(to_byte)"
+        );
+        aws_config=io.s3Path.aws_config
+    )
+
+    io.position = to_byte + 1
+
+    return result
+end
+
+function Base.seek(io::S3ReadBuffer, pos::Integer)
+    @assert isreadable(io) "Buffer isn't readable"
+    io.position = pos
+end
+
+function Base.eof(io::S3ReadBuffer)
+    return !(io.isopen && io.position < io.size)
+end
+
 function Base.close(io::S3WriteBuffer)
-    io.isopen = false
+    @assert isopen(io) "Buffer isn't open"
 
     if ismissing(io.uploadid)
 
@@ -484,31 +529,19 @@ function Base.close(io::S3WriteBuffer)
 
     end
 
+    io.isopen = false
+
+    return Nothing
+
 end
 
-# Base.read(p::S3Buffer) = read(Vector{UInt8}, p)
-#
-# function Base.read(type, p::S3Buffer)
-#     throw(ErrorException("Not Implemented Yet"))
-#
-#     # GET /example-object HTTP/1.1
-#     # Host: example-bucket.s3.<Region>.amazonaws.com
-#     # x-amz-date: Fri, 28 Jan 2011 21:32:02 GMT
-#     # Range: bytes=0-9
-#     # Authorization: AWS AKIAIOSFODNN7EXAMPLE:Yxg83MZaEgh3OZ3l0rLo5RTX11o=
-#     # Sample Response with Specified Range of the Object Bytes
-#     #
-#     # aws s3api get-object --bucket DOC-EXAMPLE-BUCKET1 --key folder/my_data --range bytes=0-500 my_data_range
-#     #
-#     # just use the get object method with ranges
-#     #
-#     # https://juliacloud.github.io/AWS.jl/stable/services/s3.html#Main.S3.get_object-Tuple{Any,%20Any}
-#     #
-#     # and I think can find out size of object in advance via
-#     #
-#     # https://juliacloud.github.io/AWS.jl/stable/services/s3.html#Main.S3.head_object-Tuple{Any,%20Any}
-#
-# end
+function Base.close(io::S3ReadBuffer)
+    @assert isopen(io) "Buffer isn't open"
+
+    io.isopen = false
+
+    return Nothing
+end
 
 export S3Path
 
