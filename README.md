@@ -70,6 +70,21 @@ df2 = Parquet2.Dataset(read(fp)) |> DataFrame
 df == df2 # true
 
 rm(fp)
+
+# Writing a Compressed CSV to S3
+using DataFrames
+using CSV
+using CodecZstd
+
+fp = S3Path("s3://bucket/data.csv.zstd")
+
+df = DataFrame(a = 1:20, b = 0, c = "awesome!")
+
+open(fp, "w") do wio
+    cwio = ZstdCompressorStream(wio)
+    CSV.write(cwio, df)
+    close(cwio)
+end
 ```
 
 ## TODO

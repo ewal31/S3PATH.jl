@@ -476,7 +476,8 @@ end
 
 # TODO need to implement the variant that takes a byte buffer
 # as it is used by all the other already implemented functions on io
-# This is just a temporary solution
+# and also methods like bytesavailable
+# This is just a quick temporary solution
 function Base.read(io::S3ReadBuffer, nb::Integer)
     @assert isreadable(io) "Buffer isn't readable"
 
@@ -509,35 +510,35 @@ function Base.eof(io::S3ReadBuffer)
 end
 
 function Base.close(io::S3WriteBuffer)
-    @assert isopen(io) "Buffer isn't open"
+    if io.isopen
 
-    if ismissing(io.uploadid)
+        if ismissing(io.uploadid)
 
-        # Don't use multipart upload we only have a small
-        # amount of data to write
-        write(io.s3Path, io.buffer.data[1:io.buffer.ptr-1])
+            # Don't use multipart upload we only have a small
+            # amount of data to write
+            write(io.s3Path, io.buffer.data[1:io.buffer.ptr-1])
 
-    else
+        else
 
-        flush(io)
+            flush(io)
 
-        finalise_multipart_upload(
-            io.s3Path,
-            io.uploadid,
-            io.writtenparts
-        )
+            finalise_multipart_upload(
+                io.s3Path,
+                io.uploadid,
+                io.writtenparts
+            )
+
+        end
+
+        io.isopen = false
 
     end
-
-    io.isopen = false
 
     return Nothing
 
 end
 
 function Base.close(io::S3ReadBuffer)
-    @assert isopen(io) "Buffer isn't open"
-
     io.isopen = false
 
     return Nothing
