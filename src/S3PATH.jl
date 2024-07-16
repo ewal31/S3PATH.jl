@@ -107,6 +107,7 @@ Base.rm(s3Path::S3Path) =
 
 function Base.mkpath(s3Path::S3Path)
     S3.put_object(s3Path.bucket, s3Path.path; aws_config=s3Path.aws_config)
+    return s3Path
 end
 
 function Base.readdir(s3Path::S3Path; join=false, sort=true)
