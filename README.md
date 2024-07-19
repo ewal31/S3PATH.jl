@@ -53,7 +53,7 @@ read(fp) == vcat(write1, write2)
 
 rm(fp)
 
-# Writing a Parquet File to S3
+# Writing and reading a Parquet File to/from S3
 using DataFrames
 using Parquet2
 
@@ -65,7 +65,9 @@ open(fp, "w") do io
     Parquet2.writefile(io, df)
 end
 
-df2 = Parquet2.Dataset(read(fp)) |> DataFrame
+df2 = open(fp, "r") do io
+    Parquet2.Dataset(io) |> DataFrame
+end
 
 df == df2 # true
 
@@ -80,10 +82,24 @@ fp = S3Path("s3://bucket/data.csv.zstd")
 
 df = DataFrame(a = 1:20, b = 0, c = "awesome!")
 
-open(fp, "w") do wio
-    cwio = ZstdCompressorStream(wio)
-    CSV.write(cwio, df)
-    close(cwio)
+wio = open(fp, "w")
+cwio = ZstdCompressorStream(wio)
+CSV.write(cwio, df)
+close(cwio)
+close(wio)
+
+# Reading an XML file
+using EzXML
+
+fp = S3Path("s3://bucket/values.xml")
+
+values = open(fp, "r") do io
+    nodecontent.(
+        findall(
+            "//option/string/text()",
+            root(readxml(io))
+        )
+    )
 end
 ```
 
@@ -92,4 +108,4 @@ end
 - missing copy/delete functions for whole folders
 - ~~copy local file to s3 reads the entire file into memory unnecessarily but it could be streamed~~
 - url encoding is missing for some parts of api
-- reading large files / streaming files
+- ~~reading large files / streaming files~~

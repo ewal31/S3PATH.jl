@@ -335,8 +335,9 @@ end
 
 function Base.open(f::Function, s3Path::S3Path, mode::AbstractString; buffersize=DEFAULTBUFFERSIZE)
     io = open(s3Path, mode; buffersize=buffersize)
-    f(io)
+    result = f(io)
     close(io)
+    return result
 end
 
 mutable struct S3WriteBuffer <: Base.IO
@@ -473,7 +474,7 @@ end
 Base.isopen(io::S3ReadBuffer) = io.isopen
 Base.isreadable(io::S3ReadBuffer) = io.isopen
 Base.iswritable(io::S3ReadBuffer) = false
-Base.position(io::S3WriteBuffer) = io.position
+Base.position(io::S3ReadBuffer) = io.position
 
 function Base.bytesavailable(io::S3ReadBuffer)
     max(length(io.buffer) - io.ptr, 0)
