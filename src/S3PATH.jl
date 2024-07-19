@@ -293,31 +293,22 @@ function Base.cp(src::S3Path, dst::S3Path)
     return nothing
 end
 
-function Base.cp(src::S3Path, dst::AbstractString)
-    open(dst, "w") do f
-        write(
-            f,
-            S3.get_object(
-                src.bucket,
-                src.path,
-                # Force Binary Format
-                Dict("response-content-type"=>"application/octet-stream");
-                aws_config=src.aws_config
-            )
-        )
+function Base.cp(src::S3Path, dst::AbstractString; buffersize=DEFAULTBUFFERSIZE)
+    open(dst, "w") do io_out
+        open(src, "r"; buffersize=buffersize) do io_in
+            while !eof(io_in)
+                write(io_out, read(io_in, UInt8))
+            end
+        end
     end
     return nothing
 end
 
 function Base.cp(src::AbstractString, dst::S3Path; buffersize=DEFAULTBUFFERSIZE)
-    # Uploads the local file in blocks of at most buffersize.
     open(src, "r") do io_in
-        open(dst, "w") do io_out
+        open(dst, "w"; buffersize=buffersize) do io_out
             while !eof(io_in)
-                flush(io_out)
-                # Could put the data straight into the request buffer,
-                # but I guess this "simplifies" the code.
-                io_out.buffer.ptr = readbytes!(io_in, io_out.buffer.data, buffersize) + 1
+                write(io_out, read(io_in, UInt8))
             end
         end
     end
@@ -326,6 +317,22 @@ end
 
 ################################################################################
 # Buffered Reading/Writing
+
+function Base.open(s3Path::S3Path, mode::AbstractString; buffersize=DEFAULTBUFFERSIZE)
+    @assert mode ∈ Set(["w", "r"]) "Only read or write is supported"
+    if mode == "w"
+        S3WriteBuffer(s3Path; buffersize=buffersize)
+    else
+        S3ReadBuffer(s3Path; buffersize=buffersize)
+    end
+end
+
+function Base.open(f::Function, s3Path::S3Path, mode::AbstractString; buffersize=DEFAULTBUFFERSIZE)
+    io = open(s3Path, mode; buffersize=buffersize)
+    result = f(io)
+    close(io)
+    return result
+end
 
 mutable struct S3WriteBuffer <: Base.IO
     buffer::IOBuffer
@@ -353,49 +360,21 @@ mutable struct S3WriteBuffer <: Base.IO
     end
 end
 
+Base.isopen(io::S3WriteBuffer) = io.isopen
 Base.isreadable(io::S3WriteBuffer) = false
 Base.iswritable(io::S3WriteBuffer) = io.isopen
-Base.isopen(io::S3WriteBuffer) = io.isopen
 Base.position(io::S3WriteBuffer) = io.position
 
-mutable struct S3ReadBuffer <: Base.IO
-    s3Path::S3Path
-    isopen::Bool
-    size::UInt64
-    position
-    function S3ReadBuffer(
-        s3Path::S3Path;
-    )
-        new(
-            s3Path,
-            true,
-            parse(
-                UInt64,
-                S3.head_object(
-                    s3Path.bucket,
-                    s3Path.path;
-                    aws_config=s3Path.aws_config
-                )["Content-Length"]),
-            0
-        )
-    end
-end
+function Base.write(io::S3WriteBuffer, byte::UInt8)
+    @assert iswritable(io) "Buffer isn't writeable"
 
-Base.isreadable(io::S3ReadBuffer) = io.isopen
-Base.iswritable(io::S3ReadBuffer) = false
-Base.isopen(io::S3ReadBuffer) = io.isopen
+    io.position += 1
 
-function Base.open(f::Function, s3Path::S3Path, mode::AbstractString; buffersize=DEFAULTBUFFERSIZE)
-    @assert mode ∈ Set(["w", "r"]) "Only read or write is currently supported"
-    if mode == "w"
-        io = S3WriteBuffer(s3Path; buffersize=buffersize)
-        f(io)
-        close(io)
-    else
-        io = S3ReadBuffer(s3Path)
-        f(io)
-        close(io)
+    if io.buffer.ptr > io.buffer.maxsize
+        flush(io)
     end
+
+    write(io.buffer, byte)
 end
 
 function Base.flush(io::S3WriteBuffer)
@@ -429,87 +408,6 @@ function Base.flush(io::S3WriteBuffer)
     return towrite
 end
 
-Base.write(io::S3WriteBuffer, content::Union{SubString{String}, String}) =
-    Base.write(io::S3WriteBuffer, Vector{UInt8}(content))
-
-function Base.write(io::S3WriteBuffer, byte::UInt8)
-    @assert iswritable(io) "Buffer isn't writeable"
-
-    # This is used, for example by Parquet2.jl
-    io.position += 1
-
-    if io.buffer.ptr > io.buffer.maxsize
-        flush(io)
-    end
-
-    write(io.buffer, byte)
-end
-
-function Base.write(io::S3WriteBuffer, content::Vector{UInt8})
-    @assert iswritable(io) "Buffer isn't writeable"
-
-    io.position += length(content)
-
-    if length(content) + io.buffer.ptr - 1 > io.buffer.maxsize
-
-        # First finish writing buffer contents
-        ptr = io.buffer.maxsize - io.buffer.ptr + 1
-        write(io.buffer, content[1:ptr])
-        flush(io)
-        ptr += 1
-
-        # Write any data that won't fit into the buffer
-        while length(content) - ptr + 1 > io.buffer.maxsize
-            write(io.buffer, content[ptr:ptr+io.buffer.maxsize-1])
-            flush(io)
-            ptr += io.buffer.maxsize
-        end
-
-        # Add remaining data to buffer
-        write(io.buffer, content[ptr:end])
-
-    else
-
-        write(io.buffer, content)
-
-    end
-end
-
-# TODO need to implement the variant that takes a byte buffer
-# as it is used by all the other already implemented functions on io
-# and also methods like bytesavailable
-# This is just a quick temporary solution
-function Base.read(io::S3ReadBuffer, nb::Integer)
-    @assert isreadable(io) "Buffer isn't readable"
-
-    from_byte = io.position
-    to_byte   = min(io.position + nb, io.size) - 1
-
-    result = S3.get_object(
-        io.s3Path.bucket,
-        io.s3Path.path,
-        # Force Binary Format
-        Dict(
-            "response-content-type" => "application/octet-stream",
-            "range" => "bytes=$(from_byte)-$(to_byte)"
-        );
-        aws_config=io.s3Path.aws_config
-    )
-
-    io.position = to_byte + 1
-
-    return result
-end
-
-function Base.seek(io::S3ReadBuffer, pos::Integer)
-    @assert isreadable(io) "Buffer isn't readable"
-    io.position = pos
-end
-
-function Base.eof(io::S3ReadBuffer)
-    return !(io.isopen && io.position < io.size)
-end
-
 function Base.close(io::S3WriteBuffer)
     if io.isopen
 
@@ -537,6 +435,81 @@ function Base.close(io::S3WriteBuffer)
 
     return Nothing
 
+end
+
+mutable struct S3ReadBuffer <: Base.IO
+    buffer::Vector{UInt8}
+    ptr::UInt64
+    s3Path::S3Path
+    isopen::Bool
+    size::UInt64
+    position
+    function S3ReadBuffer(
+        s3Path::S3Path;
+        buffersize = DEFAULTBUFFERSIZE
+    )
+        new(
+            Vector{UInt8}(undef, buffersize),
+            buffersize,
+            s3Path,
+            true,
+            parse(
+                UInt64,
+                S3.head_object(
+                    s3Path.bucket,
+                    s3Path.path;
+                    aws_config=s3Path.aws_config
+                )["Content-Length"]),
+            0
+        )
+    end
+end
+
+Base.isopen(io::S3ReadBuffer) = io.isopen
+Base.isreadable(io::S3ReadBuffer) = io.isopen
+Base.iswritable(io::S3ReadBuffer) = false
+Base.position(io::S3ReadBuffer) = io.position
+
+function Base.bytesavailable(io::S3ReadBuffer)
+    max(length(io.buffer) - io.ptr, 0)
+end
+
+function Base.read(io::S3ReadBuffer, ::Type{UInt8})
+    if io.position >= io.size
+        throw(EOFError())
+    end
+
+    if bytesavailable(io) == 0
+
+        from_byte = io.position
+        to_byte   = min(from_byte + length(io.buffer), io.size) - 1
+
+        # zero indexed
+        result = S3.get_object(
+            io.s3Path.bucket,
+            io.s3Path.path,
+            # Force Binary Format
+            Dict(
+                "response-content-type" => "application/octet-stream",
+                "range" => "bytes=$(from_byte)-$(to_byte)"
+            );
+            aws_config=io.s3Path.aws_config
+        )# Testing with mock [from_byte+1:to_byte+1] and smaller buffersize
+
+        io.ptr = length(io.buffer) - length(result)
+        io.buffer[(io.ptr+1):end] .= result
+
+    end
+
+    io.ptr += 1
+    io.position += 1
+
+    return io.buffer[io.ptr]
+
+end
+
+function Base.eof(io::S3ReadBuffer)
+    return !(io.isopen && io.position < io.size)
 end
 
 function Base.close(io::S3ReadBuffer)

@@ -1,9 +1,13 @@
 @testitem "Integration Test" begin
 
-    const test_server_port = 3000
+    const test_server_port = 3010
     const test_bucket = "bucket"
 
     using AWS
+    using DataFrames
+    using EzXML
+    using Parquet2
+
     @service S3
 
     # Modified to use custom test endpoint
@@ -29,7 +33,7 @@
     const aws_config = AWS.global_aws_config(TestConfig("http://127.0.0.1:$(test_server_port)", "eu-central-1", TestCredentials("id", "key", "token")))
 
     # Start Test Server
-    # Dashboard while running http://localhost:$(test_server_port)/moto-api/
+    # Dashboard while running http://localhost:3010/moto-api/
     server_process = run(`"$(ENV["CONDA_JL_HOME"])/bin/moto_server" -p $(test_server_port)`; wait = false)
 
     try
@@ -61,6 +65,70 @@
         rm(s3file)
         @test !isfile(s3file)
         @test !isdir(s3file)
+
+        ############################################
+        # Test reading xml
+        #
+
+        test_values = [
+            String(rand('a':'z', rand(4:20)))
+            for i in 1:rand(400:600)
+        ]
+
+        write(s3file, """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <Configuration>
+              <setting_a>
+                <string>$(join(test_values, "</string><string>"))</string>
+              </setting_a>
+              <setting_b>
+                <string>which</string>
+                <string>where</string>
+              </setting_b>
+        </Configuration>""")
+
+        # Moto doesn't seem to return ranges, instead all data
+        # so a bit more difficult to test
+        open(s3file, "r") do rio
+            xml = readxml(rio)
+            r = root(xml)
+
+            values = Vector{String}()
+            for node in nodecontent.(findall("//setting_a/string/text()", r))
+                push!(values, node)
+            end
+
+            @test test_values == values
+        end
+
+        ############################################
+        # Test reading parquet
+        #
+
+        parq_path = S3Path(test_bucket, "simple.parquet")
+
+        parquet_test_contents = DataFrame(
+            a = [1,2,3],
+            b = ["z", "x", "y"],
+        )
+
+        mktempdir() do tmpdir
+
+            pth = joinpath(tmpdir, "simple.parquet")
+
+            Parquet2.writefile(
+                pth,
+                parquet_test_contents
+            )
+
+            write(parq_path, String(read(pth)))
+
+        end
+
+        open(parq_path, "r") do rio
+            df = Parquet2.readfile(rio) |> DataFrame
+            @test isequal(parquet_test_contents, df)
+        end
 
         ############################################
         # Test creating a directory
