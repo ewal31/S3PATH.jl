@@ -293,24 +293,18 @@ function Base.cp(src::S3Path, dst::S3Path)
     return nothing
 end
 
-function Base.cp(src::S3Path, dst::AbstractString)
-    open(dst, "w") do f
-        write(
-            f,
-            S3.get_object(
-                src.bucket,
-                src.path,
-                # Force Binary Format
-                Dict("response-content-type"=>"application/octet-stream");
-                aws_config=src.aws_config
-            )
-        )
+function Base.cp(src::S3Path, dst::AbstractString; buffersize=DEFAULTBUFFERSIZE)
+    open(dst, "w") do io_out
+        open(src, "r"; buffersize=buffersize) do io_in
+            while !eof(io_in)
+                write(io_out, read(io_in, UInt8))
+            end
+        end
     end
     return nothing
 end
 
 function Base.cp(src::AbstractString, dst::S3Path; buffersize=DEFAULTBUFFERSIZE)
-    # Uploads the local file in blocks of at most buffersize.
     open(src, "r") do io_in
         open(dst, "w"; buffersize=buffersize) do io_out
             while !eof(io_in)

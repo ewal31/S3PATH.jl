@@ -87,7 +87,7 @@
               </setting_b>
         </Configuration>""")
 
-        # Mockito doesn't seem to return ranges, instead all data
+        # Moto doesn't seem to return ranges, instead all data
         # so a bit more difficult to test
         open(s3file, "r") do rio
             xml = readxml(rio)
