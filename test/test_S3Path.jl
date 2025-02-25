@@ -44,7 +44,7 @@
             Dict(
                 "body" => """
                     <CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
-                    <LocationConstraint>Europe</LocationConstraint>
+                    <LocationConstraint>eu-central-1</LocationConstraint>
                     </CreateBucketConfiguration >
                 """
         ); aws_config = aws_config)

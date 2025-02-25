@@ -4,7 +4,7 @@
     const written = Vector{UInt8}()
 
     # Mock Relevant Methods
-    function Base.write(io::S3PATH.S3Path, content::Vector{UInt8})
+    function Base.write(io::S3PATH.S3Path, content::Vector{UInt8}; blocksize=S3PATH.DEFAULTBUFFERSIZE)
         append!(written, content)
     end
 
@@ -74,7 +74,7 @@ end
     const written = Vector{UInt8}()
 
     # Mock Relevant Methods
-    function Base.write(io::S3PATH.S3Path, content::Vector{UInt8})
+    function Base.write(io::S3PATH.S3Path, content::Vector{UInt8}; blocksize=DEFAULTBUFFERSIZE)
         append!(written, content)
     end
 

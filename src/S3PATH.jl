@@ -246,6 +246,9 @@ end
 Base.write(s3Path::S3Path, content::AbstractString; blocksize=DEFAULTBUFFERSIZE) =
     Base.write(s3Path::S3Path, Vector{UInt8}(content); blocksize=blocksize)
 
+Base.write(s3Path::S3Path, content::Memory{UInt8}; blocksize=DEFAULTBUFFERSIZE) =
+    Base.write(s3Path::S3Path, convert(Vector{UInt8}, copy(content)); blocksize=blocksize)
+
 function Base.write(s3Path::S3Path, content::Vector{UInt8}; blocksize=DEFAULTBUFFERSIZE)
 
     if sizeof(content) < blocksize
