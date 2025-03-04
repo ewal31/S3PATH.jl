@@ -7,6 +7,7 @@
     using DataFrames
     using EzXML
     using Parquet2
+    using Random
 
     @service S3
 
@@ -126,6 +127,27 @@
         end
 
         open(parq_path, "r") do rio
+            df = Parquet2.readfile(rio) |> DataFrame
+            @test isequal(parquet_test_contents, df)
+        end
+
+        ############################################
+        # Test reading large parquet
+        #
+
+        parq_path = S3Path(test_bucket, "large.parquet")
+
+        parquet_test_contents = DataFrame(
+            a = rand(Int, 6 * 1_048_576),
+	    b = [String(rand(Char, 4)) for i in 6 * 1_048_576],
+        )
+
+        open(parq_path, "w"; buffersize= 5 * 1_048_576) do wio
+	    Parquet2.writefile(wio, parquet_test_contents)
+        end
+
+	# Moto Server doesn't return ranges...
+        open(parq_path, "r"; buffersize = 80 * 1_048_576) do rio
             df = Parquet2.readfile(rio) |> DataFrame
             @test isequal(parquet_test_contents, df)
         end

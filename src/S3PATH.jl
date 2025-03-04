@@ -247,7 +247,7 @@ Base.write(s3Path::S3Path, content::AbstractString; blocksize=DEFAULTBUFFERSIZE)
     Base.write(s3Path::S3Path, Vector{UInt8}(content); blocksize=blocksize)
 
 Base.write(s3Path::S3Path, content::Memory{UInt8}; blocksize=DEFAULTBUFFERSIZE) =
-    Base.write(s3Path::S3Path, convert(Vector{UInt8}, copy(content)); blocksize=blocksize)
+    Base.write(s3Path::S3Path, convert(Vector{UInt8}, content); blocksize=blocksize)
 
 function Base.write(s3Path::S3Path, content::Vector{UInt8}; blocksize=DEFAULTBUFFERSIZE)
 
@@ -402,7 +402,7 @@ function Base.flush(io::S3WriteBuffer)
                 io.s3Path,
                 io.uploadid,
                 io.partnumber,
-                io.buffer.data[1:io.buffer.ptr-1]
+                convert(Vector{UInt8}, io.buffer.data[1:io.buffer.ptr-1])
             )
         )
         seekstart(io.buffer)
@@ -497,7 +497,7 @@ function Base.read(io::S3ReadBuffer, ::Type{UInt8})
                 "range" => "bytes=$(from_byte)-$(to_byte)"
             );
             aws_config=io.s3Path.aws_config
-        )# Testing with mock [from_byte+1:to_byte+1] and smaller buffersize
+        ) # Testing with mock [from_byte+1:to_byte+1] and smaller buffersize
 
         io.ptr = length(io.buffer) - length(result)
         io.buffer[(io.ptr+1):end] .= result

@@ -6,14 +6,18 @@ version = "0.3.1"
 AWS = "fbe9abb3-538b-5e4e-ba9e-bc94f4f92ebc"
 Retry = "20febd7b-183b-5ae2-ac4a-720e7ce64774"
 
+[compat]
+Random = "1.11.0"
+
 [extras]
 Conda = "8f4d0f93-b110-5947-807f-2305c1781a2d"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 EzXML = "8f5d6c58-4d21-5cfd-889c-e3ad7ee6a615"
 Parquet2 = "98572fba-bba0-415d-956f-fa77e587d26d"
 Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 TestItemRunner = "f8b46487-2199-4994-9208-9a1283c18c0a"
 
 [targets]
-test = ["Conda", "DataFrames", "EzXML", "Parquet2", "Pkg", "Test", "TestItemRunner"]
+test = ["Conda", "DataFrames", "EzXML", "Parquet2", "Pkg", "Random", "Test", "TestItemRunner"]
